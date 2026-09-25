@@ -10,6 +10,8 @@
   function safeOrigin(u) {
     try { var x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.origin : ''; } catch (e) { return ''; }
   }
+  // 平台用 srcdoc 渲染时 SDK 已经注入好了，别再加载一次
+  if (window.CircleChat) { window.dispatchEvent(new Event('minisdk-ready')); return; }
   var origin = '';
   var m = /(?:^|[#&])ccsdk=([^&]+)/.exec(location.hash || '');
   if (m) origin = safeOrigin(decodeURIComponent(m[1]));

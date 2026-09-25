@@ -12,6 +12,8 @@
   }
   // 1) 宿主在 iframe 地址里用 #ccsdk=<origin> 传进来（最可靠）
   // 2) 退回 document.referrer：跨域时至少能拿到宿主的 origin
+  // 平台用 srcdoc 渲染时 SDK 已经注入好了，别再加载一次
+  if (window.CircleChat) { window.dispatchEvent(new Event('minisdk-ready')); return; }
   var origin = '';
   var m = /(?:^|[#&])ccsdk=([^&]+)/.exec(location.hash || '');
   if (m) origin = safeOrigin(decodeURIComponent(m[1]));
