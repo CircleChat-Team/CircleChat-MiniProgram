@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>会话便签</title>
+<!-- 平台 SDK：小程序可能托管在任何站点（这里是 GitHub raw），SDK 只能从「运行它的平台」加载 -->
+<script>
+(function () {
+  function safeOrigin(u) {
+    try { var x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.origin : ''; } catch (e) { return ''; }
+  }
+  var origin = '';
+  var m = /(?:^|[#&])ccsdk=([^&]+)/.exec(location.hash || '');
+  if (m) origin = safeOrigin(decodeURIComponent(m[1]));
+  if (!origin) origin = safeOrigin(document.referrer);
+  function fail(msg) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var p = document.createElement('p');
+      p.style.cssText = 'padding:16px;font:13px/1.6 system-ui,sans-serif;color:#888';
+      p.textContent = msg;
+      document.body.appendChild(p);
+    });
+  }
+  if (!origin) { fail('未能定位平台地址，SDK 未加载'); return; }
+  var s = document.createElement('script');
+  s.src = origin + '/mini-sdk.js';
+  s.onload = function () { window.dispatchEvent(new Event('minisdk-ready')); };
+  s.onerror = function () { fail('SDK 加载失败：' + s.src); };
+  document.head.appendChild(s);
+})();
+</script>
+<style>
+  :root { --bg: #ffffff; --panel: #f6f7f9; --ink: #1b1f26; --muted: #6b7280; --line: #e5e7eb; --primary: #2f6bff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #101318; --panel: #171b21; --ink: #e6e8eb; --muted: #9aa1ab; --line: #262b33; --primary: #5b8cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; height: 100vh; display: flex; flex-direction: column; gap: 10px;
+         background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .head h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .head .scope { font-size: 11px; color: var(--muted); }
+  textarea { flex: 1; min-height: 140px; padding: 12px; border: 1px solid var(--line); border-radius: 12px;
+             background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; resize: none; outline: none; }
+  textarea:focus { border-color: var(--primary); }
+  textarea[disabled] { opacity: .6; }
+  .row { display: flex; gap: 8px; }
+  button { flex: 1; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--primary); color: var(--primary); }
+  button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  button.primary:hover { opacity: .9; color: #fff; }
+  button[disabled] { opacity: .5; cursor: not-allowed; }
+  .tip { min-height: 18px; font-size: 12px; color: var(--muted); }
+  .tip.err { color: #e5484d; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>会话便签</h1>
+    <span class="scope" id="scope">—</span>
+  </div>
+
+  <textarea id="note" placeholder="写点什么…" disabled></textarea>
+
+  <div class="row">
+    <button type="button" class="primary" id="save" disabled>保存</button>
+    <button type="button" id="reload" disabled>重新载入</button>
+    <button type="button" id="clear" disabled>清空</button>
+    <button type="button" id="close">关闭</button>
+  </div>
+  <div class="tip" id="tip"></div>
+
+<script>
+function boot() {
+  var T = {
+    zh: { save: '保存', reload: '重新载入', clear: '清空', close: '关闭', saved: '已保存', cleared: '已清空',
+          fail: '操作失败', needPerm: '缺少 kv 权限', noCtx: '未拿到上下文（宿主未响应）', ph: '写点什么…', by: '最后由 {who} 更新' },
+    en: { save: 'Save', reload: 'Reload', clear: 'Clear', close: 'Close', saved: 'Saved', cleared: 'Cleared',
+          fail: 'Failed', needPerm: 'Missing kv permission', noCtx: 'No context (host not responding)', ph: 'Write something…', by: 'Last updated by {who}' },
+    ja: { save: '保存', reload: '再読込', clear: '消去', close: '閉じる', saved: '保存しました', cleared: '消去しました',
+          fail: '失敗', needPerm: 'kv 権限がありません', noCtx: 'コンテキストなし（ホスト未応答）', ph: '何か書いてみて…', by: '最終更新：{who}' }
+  };
+  var lang = (navigator.language || 'zh').toLowerCase();
+  var t = T[lang.indexOf('ja') === 0 ? 'ja' : lang.indexOf('zh') === 0 ? 'zh' : 'en'];
+  var KEY = 'note';
+  var KEY_BY = 'note_by';
+
+  var el = function (id) { return document.getElementById(id); };
+
+  function canWrite() { var c = CircleChat.context; return !!c && c.permissions.indexOf('kv.write') !== -1; }
+  function canRead() { var c = CircleChat.context; return !!c && c.permissions.indexOf('kv.read') !== -1; }
+
+  function tip(msg, err) { var n = el('tip'); n.textContent = msg || ''; n.className = 'tip' + (err ? ' err' : ''); }
+
+  function load() {
+    if (!canRead()) { tip(t.needPerm, true); return; }
+    el('reload').disabled = true;
+    Promise.all([CircleChat.kv.get(KEY), CircleChat.kv.get(KEY_BY)])
+      .then(function (r) {
+        el('note').disabled = false;
+        el('note').value = r[0] || '';
+        el('save').disabled = !canWrite();
+        el('clear').disabled = !canWrite();
+        tip(r[1] ? t.by.replace('{who}', r[1]) : '');
+      })
+      .catch(function (e) { tip(t.fail + '：' + (e && e.message ? e.message : ''), true); })
+      .then(function () { el('reload').disabled = false; });
+  }
+
+  function save() {
+    if (!canWrite()) { tip(t.needPerm, true); return; }
+    var v = el('note').value;
+    el('save').disabled = true;
+    CircleChat.kv.set(KEY, v)
+      .then(function () { return CircleChat.kv.set(KEY_BY, CircleChat.context.username); })
+      .then(function () { tip(t.saved); })
+      .catch(function (e) { tip(t.fail + '：' + (e && e.message ? e.message : ''), true); })
+      .then(function () { el('save').disabled = false; });
+  }
+
+  el('note').placeholder = t.ph;
+  el('save').textContent = t.save;
+  el('reload').textContent = t.reload;
+  el('clear').textContent = t.clear;
+  el('close').textContent = t.close;
+  el('save').addEventListener('click', save);
+  el('reload').addEventListener('click', load);
+  el('clear').addEventListener('click', function () {
+    el('note').value = '';
+    save();
+  });
+  el('close').addEventListener('click', function () { CircleChat.close(); });
+  el('note').addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
+  });
+
+  CircleChat.ready().then(function (ctx) {
+    if (!ctx) { tip(t.noCtx, true); return; }
+    el('scope').textContent = ctx.scope === 'group' ? '本群共享' : '仅自己可见';
+    load();
+  });
+}
+if (window.CircleChat) boot();
+else window.addEventListener('minisdk-ready', boot);
+</script>
+</body>
+</html>

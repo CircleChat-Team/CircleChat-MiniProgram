@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>会话统计</title>
+<!-- 平台 SDK：小程序可能托管在任何站点（这里是 GitHub raw），SDK 只能从「运行它的平台」加载 -->
+<script>
+(function () {
+  function safeOrigin(u) {
+    try { var x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.origin : ''; } catch (e) { return ''; }
+  }
+  var origin = '';
+  var m = /(?:^|[#&])ccsdk=([^&]+)/.exec(location.hash || '');
+  if (m) origin = safeOrigin(decodeURIComponent(m[1]));
+  if (!origin) origin = safeOrigin(document.referrer);
+  function fail(msg) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var p = document.createElement('p');
+      p.style.cssText = 'padding:16px;font:13px/1.6 system-ui,sans-serif;color:#888';
+      p.textContent = msg;
+      document.body.appendChild(p);
+    });
+  }
+  if (!origin) { fail('未能定位平台地址，SDK 未加载'); return; }
+  var s = document.createElement('script');
+  s.src = origin + '/mini-sdk.js';
+  s.onload = function () { window.dispatchEvent(new Event('minisdk-ready')); };
+  s.onerror = function () { fail('SDK 加载失败：' + s.src); };
+  document.head.appendChild(s);
+})();
+</script>
+<style>
+  :root { --bg: #ffffff; --panel: #f6f7f9; --ink: #1b1f26; --muted: #6b7280; --line: #e5e7eb; --primary: #2f6bff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #101318; --panel: #171b21; --ink: #e6e8eb; --muted: #9aa1ab; --line: #262b33; --primary: #5b8cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; height: 100vh; overflow-y: auto; background: var(--bg); color: var(--ink);
+         font: 14px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .head h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .head .name { font-size: 11px; color: var(--muted); }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .card { padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); text-align: center; }
+  .card b { display: block; font-size: 20px; line-height: 1.2; }
+  .card span { font-size: 11px; color: var(--muted); }
+  h2 { margin: 16px 0 8px; font-size: 13px; font-weight: 600; }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+  .bar .who { width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .track { flex: 1; height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 999px; background: var(--primary); }
+  .bar .n { width: 32px; text-align: right; color: var(--muted); font-size: 12px; }
+  .empty, .tip { padding: 24px 0; text-align: center; font-size: 12px; color: var(--muted); }
+  .tip.err { color: #e5484d; }
+  button { margin-top: 12px; width: 100%; padding: 9px; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--primary); color: var(--primary); }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>会话统计</h1>
+    <span class="name" id="name">—</span>
+  </div>
+
+  <div id="body"><div class="tip">加载中…</div></div>
+  <button type="button" id="close">关闭</button>
+
+<script>
+function boot() {
+  var T = {
+    zh: { total: '消息', members: '成员', mine: '我的发言', top: '发言 Top', empty: '这个会话还没有消息', fail: '读取失败', needPerm: '缺少 chat.read 权限', unknown: '未知', close: '关闭' },
+    en: { total: 'Messages', members: 'Members', mine: 'My messages', top: 'Top speakers', empty: 'No messages yet', fail: 'Failed to load', needPerm: 'Missing chat.read permission', unknown: 'Unknown', close: 'Close' },
+    ja: { total: 'メッセージ', members: 'メンバー', mine: '自分の発言', top: '発言ランキング', empty: 'まだメッセージがありません', fail: '読み込み失敗', needPerm: 'chat.read 権限がありません', unknown: '不明', close: '閉じる' }
+  };
+  var lang = (navigator.language || 'zh').toLowerCase();
+  var t = T[lang.indexOf('ja') === 0 ? 'ja' : lang.indexOf('zh') === 0 ? 'zh' : 'en'];
+
+  function render(data) {
+    var chat = data.chat || {};
+    var recent = data.recent || [];
+    var members = data.members || [];
+    document.getElementById('name').textContent = chat.name || (chat.kind === 'group' ? t.unknown : '');
+
+    var counts = {};
+    for (var i = 0; i < recent.length; i++) {
+      var f = recent[i].from || '';
+      counts[f] = (counts[f] || 0) + 1;
+    }
+    var list = Object.keys(counts).map(function (k) { return { name: k, n: counts[k] }; })
+      .sort(function (a, b) { return b.n - a.n; }).slice(0, 6);
+    var max = list.length ? list[0].n : 1;
+    var me = CircleChat.context ? CircleChat.context.username : '';
+    var mine = counts[me] || 0;
+
+    var html = '';
+    html += '<div class="cards">' +
+      '<div class="card"><b>' + recent.length + '</b><span>' + t.total + '</span></div>' +
+      '<div class="card"><b>' + (members.length || chat.memberCount || 0) + '</b><span>' + t.members + '</span></div>' +
+      '<div class="card"><b>' + (recent.length ? Math.round((mine / recent.length) * 100) : 0) + '%</b><span>' + t.mine + '</span></div>' +
+      '</div>';
+    if (!list.length) {
+      html += '<div class="empty">' + t.empty + '</div>';
+    } else {
+      html += '<h2>' + t.top + '</h2>';
+      for (var j = 0; j < list.length; j++) {
+        var it = list[j];
+        html += '<div class="bar"><span class="who" title="' + it.name + '">' + it.name + '</span>' +
+          '<span class="track"><span class="fill" style="width:' + Math.round((it.n / max) * 100) + '%"></span></span>' +
+          '<span class="n">' + it.n + '</span></div>';
+      }
+    }
+    document.getElementById('body').innerHTML = html;
+  }
+
+  function fail(msg) {
+    document.getElementById('body').innerHTML = '<div class="tip err">' + msg + '</div>';
+  }
+
+  document.getElementById('close').textContent = t.close || '关闭';
+  document.getElementById('close').addEventListener('click', function () { CircleChat.close(); });
+
+  CircleChat.ready().then(function (ctx) {
+    if (!ctx) { fail('no context'); return; }
+    if (ctx.permissions.indexOf('chat.read') === -1) { fail(t.needPerm); return; }
+    return CircleChat.getChat({ limit: 100 }).then(render).catch(function (e) {
+      fail(t.fail + '：' + (e && e.message ? e.message : ''));
+    });
+  });
+}
+if (window.CircleChat) boot();
+else window.addEventListener('minisdk-ready', boot);
+</script>
+</body>
+</html>

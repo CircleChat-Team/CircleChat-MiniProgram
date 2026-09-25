@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "name": "CircleChat 官方小程序索引",
+  "updated": "2026-09-25",
+  "apps": [
+    {
+      "id": "com.circlechat.roll",
+      "name": "掷骰子",
+      "summary": "在群里掷骰子，结果可直接发到当前会话",
+      "description": "支持 1d6、2d20 这类写法，也支持直接在面板里点按钮掷。\n在群里输入 #roll 或 #roll 2d6 即可调用；带 message.send 权限时结果会自动发到会话里。",
+      "icon": "https://raw.githubusercontent.com/CircleChat-Team/CircleChat-MiniProgram/main/roll/icon.svg",
+      "version": "1.0.0",
+      "entry": "https://raw.githubusercontent.com/CircleChat-Team/CircleChat-MiniProgram/main/roll/index.html",
+      "permissions": ["message.send"],
+      "command": "roll",
+      "window": { "width": 380, "height": 440 },
+      "author": "CircleChat",
+      "homepage": "https://github.com/CircleChat-Team/CircleChat-MiniProgram"
+    },
+    {
+      "id": "com.circlechat.stats",
+      "name": "会话统计",
+      "summary": "统计当前会话的消息量、活跃成员与我的发言占比",
+      "description": "读取当前会话最近的消息与成员列表，给出总消息数、成员数、发言 Top 5 与我的占比。\n只读取、不写入，除了 chat.read 不需要任何权限。",
+      "icon": "https://raw.githubusercontent.com/CircleChat-Team/CircleChat-MiniProgram/main/stats/icon.svg",
+      "version": "1.0.0",
+      "entry": "https://raw.githubusercontent.com/CircleChat-Team/CircleChat-MiniProgram/main/stats/index.html",
+      "permissions": ["chat.read"],
+      "command": "stats",
+      "window": { "width": 420, "height": 560 },
+      "author": "CircleChat",
+      "homepage": "https://github.com/CircleChat-Team/CircleChat-MiniProgram"
+    },
+    {
+      "id": "com.circlechat.notes",
+      "name": "会话便签",
+      "summary": "给当前会话留一块共享便签，数据存在平台的 KV 里",
+      "description": "便签内容按「小程序 + 会话」隔离存储：同一个群里的所有人看到同一份，别的群互不干扰。\n用于演示 KV 读写（kv.read / kv.write）。",
+      "icon": "https://raw.githubusercontent.com/CircleChat-Team/CircleChat-MiniProgram/main/notes/icon.svg",
+      "version": "1.0.0",
+      "entry": "https://raw.githubusercontent.com/CircleChat-Team/CircleChat-MiniProgram/main/notes/index.html",
+      "permissions": ["kv.read", "kv.write"],
+      "command": "note",
+      "window": { "width": 420, "height": 480 },
+      "author": "CircleChat",
+      "homepage": "https://github.com/CircleChat-Team/CircleChat-MiniProgram"
+    }
+  ]
+}

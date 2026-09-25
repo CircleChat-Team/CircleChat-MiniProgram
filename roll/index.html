@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>掷骰子</title>
+<!-- 平台 SDK：小程序可能托管在任何站点（这里是 GitHub raw），SDK 只能从「运行它的平台」加载 -->
+<script>
+(function () {
+  function safeOrigin(u) {
+    try { var x = new URL(u); return (x.protocol === 'http:' || x.protocol === 'https:') ? x.origin : ''; } catch (e) { return ''; }
+  }
+  // 1) 宿主在 iframe 地址里用 #ccsdk=<origin> 传进来（最可靠）
+  // 2) 退回 document.referrer：跨域时至少能拿到宿主的 origin
+  var origin = '';
+  var m = /(?:^|[#&])ccsdk=([^&]+)/.exec(location.hash || '');
+  if (m) origin = safeOrigin(decodeURIComponent(m[1]));
+  if (!origin) origin = safeOrigin(document.referrer);
+  function fail(msg) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var p = document.createElement('p');
+      p.style.cssText = 'padding:16px;font:13px/1.6 system-ui,sans-serif;color:#888';
+      p.textContent = msg;
+      document.body.appendChild(p);
+    });
+  }
+  if (!origin) { fail('未能定位平台地址，SDK 未加载'); return; }
+  var s = document.createElement('script');
+  s.src = origin + '/mini-sdk.js';
+  s.onload = function () { window.dispatchEvent(new Event('minisdk-ready')); };
+  s.onerror = function () { fail('SDK 加载失败：' + s.src); };
+  document.head.appendChild(s);
+})();
+</script>
+<style>
+  :root { --bg: #ffffff; --panel: #f6f7f9; --ink: #1b1f26; --muted: #6b7280; --line: #e5e7eb; --primary: #2f6bff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #101318; --panel: #171b21; --ink: #e6e8eb; --muted: #9aa1ab; --line: #262b33; --primary: #5b8cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; height: 100vh; display: flex; flex-direction: column; gap: 12px;
+         background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  .head { display: flex; align-items: center; gap: 8px; }
+  .head h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .head .scope { font-size: 11px; color: var(--muted); }
+  .face { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+          border-radius: 16px; background: var(--panel); border: 1px solid var(--line); }
+  .val { font-size: 44px; font-weight: 700; letter-spacing: 2px; }
+  .expr { font-size: 12px; color: var(--muted); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { flex: 1; min-width: 72px; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--primary); color: var(--primary); }
+  button.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  button.primary:hover { opacity: .9; color: #fff; }
+  button[disabled] { opacity: .5; cursor: not-allowed; }
+  .tip { min-height: 18px; font-size: 12px; color: var(--muted); text-align: center; }
+  .tip.err { color: #e5484d; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>掷骰子</h1>
+    <span class="scope" id="scope">—</span>
+  </div>
+
+  <div class="face">
+    <div class="val" id="val">—</div>
+    <div class="expr" id="expr">点下面的按钮开始</div>
+  </div>
+
+  <div class="row">
+    <button type="button" data-dice="1d6">1d6</button>
+    <button type="button" data-dice="2d6">2d6</button>
+    <button type="button" data-dice="1d20">1d20</button>
+    <button type="button" data-dice="3d6">3d6</button>
+  </div>
+  <div class="row">
+    <button type="button" class="primary" id="send" disabled>发送到会话</button>
+    <button type="button" id="close">关闭</button>
+  </div>
+  <div class="tip" id="tip"></div>
+
+<script>
+function boot() {
+  var T = {
+    zh: { send: '发送到会话', close: '关闭', sent: '已发送到会话', needPerm: '没有 message.send 权限，结果只能自己看', fail: '发送失败', noCtx: '未拿到上下文（宿主未响应）', rolling: '掷骰中…' },
+    en: { send: 'Send to chat', close: 'Close', sent: 'Sent to chat', needPerm: 'No message.send permission — result stays here', fail: 'Failed to send', noCtx: 'No context (host not responding)', rolling: 'Rolling…' },
+    ja: { send: 'チャットに送信', close: '閉じる', sent: '送信しました', needPerm: 'message.send 権限がないため結果はここだけに表示', fail: '送信に失敗', noCtx: 'コンテキストなし（ホスト未応答）', rolling: '振っています…' }
+  };
+  var lang = (navigator.language || 'zh').toLowerCase();
+  var t = T[lang.indexOf('ja') === 0 ? 'ja' : lang.indexOf('zh') === 0 ? 'zh' : 'en'];
+
+  var el = function (id) { return document.getElementById(id); };
+  var last = null; // {expr, total, detail}
+
+  function canSend() {
+    var c = CircleChat.context;
+    return !!c && c.permissions && c.permissions.indexOf('message.send') !== -1;
+  }
+
+  function roll(expr) {
+    var m = /^(\d*)d(\d+)$/i.exec(String(expr || '').trim());
+    var n = m ? Math.max(1, Math.min(20, parseInt(m[1] || '1', 10))) : 1;
+    var face = m ? Math.max(2, Math.min(1000, parseInt(m[2], 10))) : 6;
+    var parts = [];
+    var total = 0;
+    for (var i = 0; i < n; i++) { var v = 1 + Math.floor(Math.random() * face); parts.push(v); total += v; }
+    var label = n + 'd' + face;
+    last = { expr: label, total: total, detail: n > 1 ? parts.join(' + ') + ' = ' + total : String(total) };
+    el('val').textContent = String(total);
+    el('expr').textContent = label + '：' + last.detail;
+    el('send').disabled = !canSend();
+  }
+
+  function send() {
+    if (!last) return;
+    if (!canSend()) { tip(t.needPerm, true); return; }
+    el('send').disabled = true;
+    CircleChat.sendMessage('🎲 ' + last.expr + ' → ' + last.detail)
+      .then(function () { tip(t.sent); })
+      .catch(function (e) { tip(t.fail + '：' + (e && e.message ? e.message : ''), true); })
+      .then(function () { el('send').disabled = false; });
+  }
+
+  function tip(msg, err) {
+    var n = el('tip');
+    n.textContent = msg || '';
+    n.className = 'tip' + (err ? ' err' : '');
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-dice]'), function (b) {
+    b.addEventListener('click', function () { roll(b.getAttribute('data-dice')); });
+  });
+  el('send').textContent = t.send;
+  el('send').addEventListener('click', send);
+  el('close').textContent = t.close;
+  el('close').addEventListener('click', function () { CircleChat.close(); });
+
+  // #roll / #roll 2d6：被指令唤起时自动掷一次，有权限就顺手发到会话
+  CircleChat.on('invoke', function (p) {
+    var arg = String((p && p.args) || '').trim().replace(/^d/, '1d');
+    roll(arg || '1d6');
+    if (canSend()) send();
+  });
+
+  CircleChat.ready().then(function (ctx) {
+    if (!ctx) { tip(t.noCtx, true); return; }
+    el('scope').textContent = ctx.scope === 'group' ? '群聊 · #' + ctx.command : '个人 · #' + ctx.command;
+    el('send').disabled = !canSend();
+  });
+}
+if (window.CircleChat) boot();
+else window.addEventListener('minisdk-ready', boot);
+</script>
+</body>
+</html>
